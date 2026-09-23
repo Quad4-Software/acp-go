@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="93" height="20" role="img" aria-label="license: 0BSD">
+<rect width="93" height="20" rx="4" fill="#12121a"/>
+<rect x="57" width="36" height="20" rx="4" fill="#8b5cf6"/>
+<rect x="57" width="4" height="20" fill="#8b5cf6"/>
+<rect x="0.5" y="0.5" width="92" height="19" rx="3.5" fill="none" stroke="#2d2d3d"/>
+<text x="28" y="13" fill="#8a8a9e" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11" text-anchor="middle">license</text>
+<text x="75" y="13" fill="#12121a" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11" text-anchor="middle" font-weight="bold">0BSD</text>
+</svg>

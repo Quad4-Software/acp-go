@@ -1,0 +1,28 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - gosec
+    - misspell
+    - unconvert
+    - revive
+    - whitespace
+    - gocritic
+    - perfsprint
+    - errorlint
+  exclusions:
+    rules:
+      # Unimplemented* types are embedding stubs whose methods are
+      # documented once on the type itself.
+      - linters: [revive]
+        text: "exported method Unimplemented"
+
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
