@@ -231,8 +231,16 @@ func (c *Conn) readLoop(ctx context.Context) error {
 		}
 		switch {
 		case m.isRequest():
+			if m.JSONRPC != JSONRPCVersion {
+				c.respond(*m.ID, nil,
+					NewError(ErrCodeInvalidRequest, "unsupported jsonrpc version"))
+				continue
+			}
 			c.dispatchRequest(m)
 		case m.isNotification():
+			if m.JSONRPC != JSONRPCVersion {
+				continue
+			}
 			c.dispatchNotification(m)
 		case m.isResponse():
 			c.dispatchResponse(m)

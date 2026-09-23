@@ -39,21 +39,33 @@ type Transport interface {
 // an io.Reader and io.Writer, as required by the ACP stdio transport.
 // Messages must not contain embedded newlines.
 type Line struct {
-	r *bufio.Reader
-	w io.Writer
-
+	w   io.Writer
 	wmu sync.Mutex
 	c   io.Closer
+
+	lines   chan readResult
+	done    chan struct{}
+	doneOne sync.Once
+	lastErr error
+}
+
+// readResult is one line or the terminal read error from serve.
+type readResult struct {
+	line []byte
+	err  error
 }
 
 // NewLine returns a transport over r and w. If closer is
 // non-nil it is called by Close.
 func NewLine(r io.Reader, w io.Writer, closer io.Closer) *Line {
-	return &Line{
-		r: bufio.NewReaderSize(r, 1<<20),
-		w: w,
-		c: closer,
+	t := &Line{
+		w:     w,
+		c:     closer,
+		lines: make(chan readResult, 32),
+		done:  make(chan struct{}),
 	}
+	go t.serve(bufio.NewReaderSize(r, 1<<20))
+	return t
 }
 
 // Stdio returns the transport an agent uses: newline-delimited
@@ -63,14 +75,71 @@ func Stdio() *Line {
 	return NewLine(os.Stdin, os.Stdout, nil)
 }
 
+// serve is the single reader goroutine. It delivers each line and the
+// terminal error over lines, then closes the channel. lastErr is set
+// before close so drained readers see the same terminal error.
+func (t *Line) serve(r *bufio.Reader) {
+	for {
+		line, err := r.ReadBytes('\n')
+		if err == nil && len(line) > MaxMessageSize {
+			err = fmt.Errorf("transport: message exceeds %d bytes", MaxMessageSize)
+		}
+		res := readResult{err: err}
+		if err == nil {
+			res.line = trimLine(line)
+		}
+		select {
+		case t.lines <- res:
+		case <-t.done:
+		}
+		if err != nil {
+			t.lastErr = err
+			close(t.lines)
+			return
+		}
+		select {
+		case <-t.done:
+			t.lastErr = io.EOF
+			close(t.lines)
+			return
+		default:
+		}
+	}
+}
+
+// trimLine removes a trailing \n and optional \r.
+func trimLine(line []byte) []byte {
+	if n := len(line); n > 0 && line[n-1] == '\n' {
+		line = line[:n-1]
+		if n > 1 && line[n-2] == '\r' {
+			line = line[:n-2]
+		}
+	}
+	return line
+}
+
 // Read reads one newline-delimited message. The message is not
 // validated; malformed JSON is reported to the peer by the Conn layer.
+// A canceled Read never loses or corrupts a partially read line: the
+// next Read continues from the same stream position.
 func (t *Line) Read(ctx context.Context) (json.RawMessage, error) {
-	line, err := readLine(ctx, t.r)
-	if err != nil {
-		return nil, err
+	select {
+	case res, ok := <-t.lines:
+		if !ok {
+			if t.lastErr != nil {
+				return nil, t.lastErr
+			}
+			return nil, io.EOF
+		}
+		if res.err != nil {
+			return nil, res.err
+		}
+		return json.RawMessage(res.line), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-t.done:
+		return nil, io.EOF
 	}
-	return json.RawMessage(line), nil
 }
 
 // Write writes one message followed by a newline.
@@ -87,48 +156,16 @@ func (t *Line) Write(ctx context.Context, msg json.RawMessage) error {
 	return err
 }
 
-// Close releases transport resources.
+// Close releases transport resources and unblocks pending reads. If the
+// underlying reader is a stream that cannot be closed from here (for
+// example a pipe owned by the caller), the reader goroutine stays
+// parked on it until input arrives or it reaches EOF.
 func (t *Line) Close() error {
+	t.doneOne.Do(func() { close(t.done) })
 	if t.c != nil {
 		return t.c.Close()
 	}
 	return nil
-}
-
-// readLine reads a single line, honoring context cancellation between
-// reads. bufio.Reader has no cancellable Read, so reads happen on a
-// helper goroutine that is abandoned on cancellation; the next Read call
-// continues from the same reader. Abandoned reads can consume partial
-// input, so callers should prefer closing the transport to cancel.
-func readLine(ctx context.Context, r *bufio.Reader) ([]byte, error) {
-	type result struct {
-		line []byte
-		err  error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		line, err := r.ReadBytes('\n')
-		if err == nil && len(line) > MaxMessageSize {
-			err = fmt.Errorf("transport: message exceeds %d bytes", MaxMessageSize)
-		}
-		ch <- result{line, err}
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case res := <-ch:
-		if res.err != nil {
-			return nil, res.err
-		}
-		line := res.line
-		if n := len(line); n > 0 && line[n-1] == '\n' {
-			line = line[:n-1]
-			if n > 1 && line[n-2] == '\r' {
-				line = line[:n-2]
-			}
-		}
-		return line, nil
-	}
 }
 
 // CommandTransport runs a child process and speaks newline-delimited
@@ -136,10 +173,11 @@ func readLine(ctx context.Context, r *bufio.Reader) ([]byte, error) {
 // the provided writer, or discarded when nil. This is the transport a
 // client uses to talk to a local agent subprocess.
 type CommandTransport struct {
-	cmd   *exec.Cmd
-	line  *Line
-	stdin io.Closer
-	done  chan error
+	cmd     *exec.Cmd
+	line    *Line
+	stdin   io.Closer
+	exited  chan struct{}
+	waitErr error
 }
 
 // NewCommandTransport starts cmd, which must have Stdin, Stdout, and
@@ -169,9 +207,12 @@ func NewCommandTransport(cmd *exec.Cmd, stderr io.Writer) (*CommandTransport, er
 	} else {
 		go func() { _, _ = io.Copy(io.Discard, errPipe) }()
 	}
-	t := &CommandTransport{cmd: cmd, stdin: stdin, done: make(chan error, 1)}
+	t := &CommandTransport{cmd: cmd, stdin: stdin, exited: make(chan struct{})}
 	t.line = NewLine(stdout, stdin, nil)
-	go func() { t.done <- cmd.Wait() }()
+	go func() {
+		t.waitErr = cmd.Wait()
+		close(t.exited)
+	}()
 	return t, nil
 }
 
@@ -197,17 +238,21 @@ func (t *CommandTransport) Write(ctx context.Context, msg json.RawMessage) error
 func (t *CommandTransport) Process() *os.Process { return t.cmd.Process }
 
 // Wait blocks until the child exits and returns its exit error, if any.
-func (t *CommandTransport) Wait() error { return <-t.done }
+// It is safe to call Wait and Close together; both report the same
+// exit error.
+func (t *CommandTransport) Wait() error {
+	<-t.exited
+	return t.waitErr
+}
 
 // Close closes the child stdin, then kills the process if it has not
 // exited.
 func (t *CommandTransport) Close() error {
 	_ = t.stdin.Close()
 	select {
-	case err := <-t.done:
-		return err
+	case <-t.exited:
 	default:
+		_ = t.cmd.Process.Kill()
 	}
-	_ = t.cmd.Process.Kill()
-	return <-t.done
+	return t.Wait()
 }

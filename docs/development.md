@@ -42,6 +42,11 @@ go test -race ./...
 - Tests must exercise real behavior: wire shapes are asserted as
   golden JSON maps, unions round-trip in both directions, and the
   connection tests run over real `io.Pipe` transports.
+- The suite layers: unit and wire tests, race tests (`go test -race`),
+  fuzz targets on every union decoder, `testing/quick` property tests,
+  adversarial frame tests, chaos transport tests, goroutine leak
+  checks, benchmarks, and an e2e suite that builds and drives the real
+  echo-agent binary as a subprocess.
 
 ## CI
 
