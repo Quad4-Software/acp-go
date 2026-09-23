@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 
 	"github.com/Quad4-Software/acp-go"
+	"github.com/Quad4-Software/acp-go/transport"
 )
 
 type echoAgent struct {
@@ -80,7 +81,7 @@ func (a *echoAgent) Prompt(ctx context.Context, req *acp.PromptRequest) (*acp.Pr
 func main() {
 	log.SetOutput(os.Stderr)
 	agent := &echoAgent{}
-	side := acp.NewAgentSide(acp.StdioTransport(), agent)
+	side := acp.NewAgentSide(transport.Stdio(), agent)
 	agent.side = side
 	if err := side.Run(context.Background()); err != nil {
 		log.Fatal(err)

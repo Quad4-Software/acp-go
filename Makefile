@@ -1,4 +1,4 @@
-COVERAGE_THRESHOLD ?= 75
+COVERAGE_THRESHOLD ?= 90
 
 all: fmt vet lint test build
 
@@ -18,7 +18,7 @@ fuzz:
 	go test -run=Fuzz -fuzz=FuzzUnionUnmarshal -fuzztime=30s .
 
 cover:
-	go test -race -coverprofile=coverage.out .
+	go test -race -coverprofile=coverage.out . ./jsonrpc ./transport
 
 cover-check:
 	@total=$$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/,"",$$3); print $$3}'); \

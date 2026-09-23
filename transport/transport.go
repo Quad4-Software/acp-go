@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: 0BSD
 
-package acp
+// Package transport adapts byte streams into channels of whole
+// JSON-RPC messages: newline-delimited lines, process stdio, and any
+// custom reader and writer pair.
+package transport
 
 import (
 	"bufio"
@@ -32,10 +35,10 @@ type Transport interface {
 	Close() error
 }
 
-// LineTransport frames JSON-RPC messages as newline-delimited JSON over
+// Line frames JSON-RPC messages as newline-delimited JSON over
 // an io.Reader and io.Writer, as required by the ACP stdio transport.
 // Messages must not contain embedded newlines.
-type LineTransport struct {
+type Line struct {
 	r *bufio.Reader
 	w io.Writer
 
@@ -43,26 +46,26 @@ type LineTransport struct {
 	c   io.Closer
 }
 
-// NewLineTransport returns a transport over r and w. If closer is
+// NewLine returns a transport over r and w. If closer is
 // non-nil it is called by Close.
-func NewLineTransport(r io.Reader, w io.Writer, closer io.Closer) *LineTransport {
-	return &LineTransport{
+func NewLine(r io.Reader, w io.Writer, closer io.Closer) *Line {
+	return &Line{
 		r: bufio.NewReaderSize(r, 1<<20),
 		w: w,
 		c: closer,
 	}
 }
 
-// StdioTransport returns the transport an agent uses: newline-delimited
+// Stdio returns the transport an agent uses: newline-delimited
 // JSON on stdin and stdout. Nothing else may be written to stdout. Use
 // stderr for logging.
-func StdioTransport() *LineTransport {
-	return NewLineTransport(os.Stdin, os.Stdout, nil)
+func Stdio() *Line {
+	return NewLine(os.Stdin, os.Stdout, nil)
 }
 
 // Read reads one newline-delimited message. The message is not
 // validated; malformed JSON is reported to the peer by the Conn layer.
-func (t *LineTransport) Read(ctx context.Context) (json.RawMessage, error) {
+func (t *Line) Read(ctx context.Context) (json.RawMessage, error) {
 	line, err := readLine(ctx, t.r)
 	if err != nil {
 		return nil, err
@@ -71,7 +74,7 @@ func (t *LineTransport) Read(ctx context.Context) (json.RawMessage, error) {
 }
 
 // Write writes one message followed by a newline.
-func (t *LineTransport) Write(ctx context.Context, msg json.RawMessage) error {
+func (t *Line) Write(ctx context.Context, msg json.RawMessage) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -85,7 +88,7 @@ func (t *LineTransport) Write(ctx context.Context, msg json.RawMessage) error {
 }
 
 // Close releases transport resources.
-func (t *LineTransport) Close() error {
+func (t *Line) Close() error {
 	if t.c != nil {
 		return t.c.Close()
 	}
@@ -106,7 +109,7 @@ func readLine(ctx context.Context, r *bufio.Reader) ([]byte, error) {
 	go func() {
 		line, err := r.ReadBytes('\n')
 		if err == nil && len(line) > MaxMessageSize {
-			err = fmt.Errorf("acp: message exceeds %d bytes", MaxMessageSize)
+			err = fmt.Errorf("transport: message exceeds %d bytes", MaxMessageSize)
 		}
 		ch <- result{line, err}
 	}()
@@ -134,7 +137,7 @@ func readLine(ctx context.Context, r *bufio.Reader) ([]byte, error) {
 // client uses to talk to a local agent subprocess.
 type CommandTransport struct {
 	cmd   *exec.Cmd
-	line  *LineTransport
+	line  *Line
 	stdin io.Closer
 	done  chan error
 }
@@ -144,7 +147,7 @@ type CommandTransport struct {
 // speaking to the child.
 func NewCommandTransport(cmd *exec.Cmd, stderr io.Writer) (*CommandTransport, error) {
 	if cmd.Stdin != nil || cmd.Stdout != nil || cmd.Stderr != nil {
-		return nil, errors.New("acp: cmd Stdin, Stdout and Stderr must be unset")
+		return nil, errors.New("transport: cmd Stdin, Stdout and Stderr must be unset")
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -167,7 +170,7 @@ func NewCommandTransport(cmd *exec.Cmd, stderr io.Writer) (*CommandTransport, er
 		go func() { _, _ = io.Copy(io.Discard, errPipe) }()
 	}
 	t := &CommandTransport{cmd: cmd, stdin: stdin, done: make(chan error, 1)}
-	t.line = NewLineTransport(stdout, stdin, nil)
+	t.line = NewLine(stdout, stdin, nil)
 	go func() { t.done <- cmd.Wait() }()
 	return t, nil
 }

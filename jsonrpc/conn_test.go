@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: 0BSD
 
-package acp
+package jsonrpc
 
 import (
 	"context"
@@ -10,13 +10,15 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Quad4-Software/acp-go/transport"
 )
 
 // pipePair returns two transports connected back to back.
-func pipePair() (*LineTransport, *LineTransport) {
+func pipePair() (*transport.Line, *transport.Line) {
 	aR, aW := io.Pipe()
 	bR, bW := io.Pipe()
-	return NewLineTransport(aR, bW, nil), NewLineTransport(bR, aW, nil)
+	return transport.NewLine(aR, bW, nil), transport.NewLine(bR, aW, nil)
 }
 
 func runConn(t *testing.T, c *Conn) {
@@ -67,7 +69,7 @@ func TestErrorPropagation(t *testing.T) {
 	ta, tb := pipePair()
 	a, b := NewConn(ta), NewConn(tb)
 	b.Handle("auth", func(context.Context, json.RawMessage) (any, error) {
-		return nil, AuthRequired()
+		return nil, NewError(ErrCodeAuthRequired, "authentication required")
 	})
 	runConn(t, a)
 	runConn(t, b)

@@ -14,6 +14,7 @@ import (
 	"os/exec"
 
 	"github.com/Quad4-Software/acp-go"
+	"github.com/Quad4-Software/acp-go/transport"
 )
 
 type printingClient struct {
@@ -36,13 +37,13 @@ func run(ctx context.Context, agentCmd, prompt string) error {
 	// The agent path is user-supplied on purpose: this example launches
 	// whatever agent binary the caller passes.
 	cmd := exec.CommandContext(ctx, agentCmd) // #nosec G204 -- intentional, this is an agent launcher
-	transport, err := acp.NewCommandTransport(cmd, os.Stderr)
+	tr, err := transport.NewCommandTransport(cmd, os.Stderr)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = transport.Close() }()
+	defer func() { _ = tr.Close() }()
 
-	side := acp.NewClientSide(transport, printingClient{})
+	side := acp.NewClientSide(tr, printingClient{})
 	go func() { _ = side.Run(ctx) }()
 
 	init, err := side.Initialize(ctx, &acp.InitializeRequest{

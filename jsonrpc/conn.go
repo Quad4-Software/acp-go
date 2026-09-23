@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: 0BSD
 
-package acp
+package jsonrpc
 
 import (
 	"context"
@@ -10,10 +10,12 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+
+	"github.com/Quad4-Software/acp-go/transport"
 )
 
 // ErrClosed is returned by calls made after the connection is closed.
-var ErrClosed = errors.New("acp: connection closed")
+var ErrClosed = errors.New("jsonrpc: connection closed")
 
 // Handler processes an incoming request and returns its result.
 // Returning a nil result produces a JSON-RPC result of null.
@@ -29,7 +31,7 @@ type NotificationHandler func(ctx context.Context, params json.RawMessage)
 // dispatches inbound requests and notifications to registered handlers
 // and correlates outbound calls with their responses.
 type Conn struct {
-	t Transport
+	t transport.Transport
 
 	mu            sync.Mutex
 	pending       map[string]chan rpcOutcome
@@ -52,7 +54,7 @@ type rpcOutcome struct {
 }
 
 // NewConn returns a connection on transport t.
-func NewConn(t Transport) *Conn {
+func NewConn(t transport.Transport) *Conn {
 	return &Conn{
 		t:             t,
 		pending:       make(map[string]chan rpcOutcome),
@@ -114,7 +116,7 @@ func (c *Conn) Call(ctx context.Context, method string, params, out any) error {
 	if params != nil {
 		b, err := json.Marshal(params)
 		if err != nil {
-			return fmt.Errorf("acp: marshal params: %w", err)
+			return fmt.Errorf("jsonrpc: marshal params: %w", err)
 		}
 		rawParams = b
 	}
@@ -151,7 +153,7 @@ func (c *Conn) Call(ctx context.Context, method string, params, out any) error {
 			return nil
 		}
 		if err := json.Unmarshal(oc.result, out); err != nil {
-			return fmt.Errorf("acp: decode %s result: %w", method, err)
+			return fmt.Errorf("jsonrpc: decode %s result: %w", method, err)
 		}
 		return nil
 	case <-ctx.Done():
@@ -169,7 +171,7 @@ func (c *Conn) Notify(ctx context.Context, method string, params any) error {
 	if params != nil {
 		b, err := json.Marshal(params)
 		if err != nil {
-			return fmt.Errorf("acp: marshal params: %w", err)
+			return fmt.Errorf("jsonrpc: marshal params: %w", err)
 		}
 		rawParams = b
 	}

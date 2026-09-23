@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: 0BSD
 
-package acp
+// Package jsonrpc implements the JSON-RPC 2.0 connection engine that
+// carries ACP messages between agents and clients. It is transport
+// agnostic: pair it with any transport.Transport.
+package jsonrpc
 
 import (
 	"bytes"
@@ -86,7 +89,7 @@ func (r *RequestID) UnmarshalJSON(b []byte) error {
 		}
 		v, err := n.Int64()
 		if err != nil {
-			return fmt.Errorf("acp: request id must be an integer: %w", err)
+			return fmt.Errorf("jsonrpc: request id must be an integer: %w", err)
 		}
 		*r = IntID(v)
 		return nil
@@ -153,6 +156,6 @@ func (r rpcResponse) MarshalJSON() ([]byte, error) {
 // CancelRequestNotification is the params of the $/cancel_request
 // notification.
 type CancelRequestNotification struct {
-	RequestID RequestID `json:"requestId"`
-	Meta      Meta      `json:"_meta,omitempty"`
+	RequestID RequestID      `json:"requestId"`
+	Meta      map[string]any `json:"_meta,omitempty"`
 }

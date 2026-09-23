@@ -11,4 +11,11 @@
 // NewAgentSide. Clients implement the Client interface and serve a
 // Conn created with NewClientSide. Both sides can issue requests and
 // notifications to the peer through the typed methods on each side.
+//
+// The module is split into three packages: this one carries the
+// protocol model and the typed agent and client APIs, the transport
+// package carries byte stream adapters (stdio, subprocess, custom
+// readers and writers), and the jsonrpc package carries the
+// connection engine underneath both sides. Most users only need this
+// package plus transport.
 package acp
