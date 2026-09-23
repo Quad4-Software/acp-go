@@ -79,7 +79,7 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
-      - run: go test -race -coverprofile=coverage.out .
+      - run: make cover
       - run: make cover-check
       - run: make badge
       - name: Check badge is current
